@@ -22,7 +22,7 @@ jobs:
       - name: Install python 🐍
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Install
         run: |
@@ -36,9 +36,14 @@ jobs:
           python blueos_repository/consolidate.py
           mv manifest.json build/
           mv manifest.log build/
+          gzip build/manifest.json --best --keep
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Copy repos folder for getting the extension logos
+        run: |
+          cp -r repos build/
 
       - name: Build website
         run: |
@@ -51,13 +56,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: generation-logs
-          path: manifest.log
+          path: build/manifest.log
 
       - name: Upload manifest
         uses: actions/upload-artifact@v4
         with:
           name: manifest.json
           path: build/manifest.json
+
+      - name: Upload manifest gz
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest.json.gz
+          path: build/manifest.json.gz
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@v4

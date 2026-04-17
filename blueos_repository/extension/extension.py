@@ -6,7 +6,7 @@ import aiohttp
 import json5
 from docker.hub import DockerHub
 from docker.models.blob import Blob
-from docker.models.manifest import ManifestFetch, ManifestPlatform
+from docker.models.manifest import ImageManifest, ManifestFetch, ManifestPlatform
 from docker.models.repo import RepoInfo
 from docker.models.tag import Tag
 from docker.registry import DockerRegistry
@@ -112,7 +112,7 @@ class Extension:
             bool: True if compatible, False otherwise.
         """
 
-        return bool(platform.os == "linux" and platform.architecture == "arm")
+        return bool(platform.os == "linux" and "arm" in platform.architecture)
 
     async def __extract_valid_embedded_digest(self, fetch: ManifestFetch) -> str:
         """
@@ -131,20 +131,21 @@ class Extension:
         """
 
         # Regular images/ OCI images
-        if fetch.is_image_manifest:
+        if isinstance(fetch.manifest, ImageManifest):
             return str(fetch.manifest.config.digest)
 
         # Manifest list
         valid_manifests = [entry for entry in fetch.manifest.manifests if self.__is_compatible(entry.platform)]
         if len(valid_manifests) != 1:
-            raise RuntimeError(
-                f"Expected one valid manifest for target embedded arch but found: {len(valid_manifests)}"
+            Logger.warning(
+                self.identifier,
+                f"Expected one valid manifest for target embedded arch but found: {len(valid_manifests)}",
             )
 
         # Needs to refetch because it was a manifest list
         manifest_fetch = await self.registry.get_manifest(valid_manifests[0].digest)
 
-        if manifest_fetch.is_image_manifest:
+        if isinstance(manifest_fetch.manifest, ImageManifest):
             return str(manifest_fetch.manifest.config.digest)
 
         raise RuntimeError(f"Expected to have a valid image manifest but got a manifest list: {manifest_fetch}")
@@ -156,8 +157,8 @@ class Extension:
         links = json5.loads(labels.get("links", "{}"))
         filter_tags = json5.loads(labels.get("tags", "[]"))
 
-        docs_raw = links.pop("docs", links.pop("documentation", labels.get("docs", None)))
-        company_raw = labels.get("company", None)
+        docs_link = links.pop("docs", links.pop("documentation", labels.get("docs", None)))
+        company_raw = labels.get("company", labels.get("maintainer", None))
         permissions_raw = labels.get("permissions", None)
 
         readme = labels.get("readme", None)
@@ -185,7 +186,7 @@ class Extension:
         return ExtensionVersion(
             identifier=tag_identifier,
             tag=version_tag.name,
-            type=labels.get("type", ExtensionType.OTHER),
+            type=ExtensionType(labels.get("type", ExtensionType.OTHER.value)),
             website=links.pop("website", labels.get("website", None)),
             readme=readme,
             support=links.pop("support", labels.get("support", None)),
@@ -193,7 +194,7 @@ class Extension:
             extra_links=links,
             authors=json5.loads(authors),
             filter_tags=ExtensionVersion.validate_filter_tags(filter_tags),
-            docs=json5.loads(docs_raw) if docs_raw else None,
+            docs=docs_link,
             company=json5.loads(company_raw) if company_raw else None,
             permissions=json5.loads(permissions_raw) if permissions_raw else None,
             images=self.__extract_images_from_tag(version_tag),
